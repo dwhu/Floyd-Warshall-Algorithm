@@ -64,9 +64,11 @@ int main(int argc, char* argv[]){
     
     /* Local Info */
     int world_id;
-    int nprocs;
+    int p;
     int n;
-    int n_squared;
+    int nn;
+    int nnp;
+    int n_sqp;
     double * local_section;
     int * my_row_group;
     int * my_column_group;
@@ -97,17 +99,17 @@ int main(int argc, char* argv[]){
     /* World */
     MPI_Init(&argc,&argv);
     MPI_Comm_rank(MPI_COMM_WORLD,&world_id);
-    MPI_Comm_size(MPI_COMM_WORLD,&nprocs);
+    MPI_Comm_size(MPI_COMM_WORLD,&p);
     MPI_Comm_group(MPI_COMM_WORLD,&world_group);
 
     /* Verify the correct number of workers to complete task
         ie. square_root(p) has no rounding error
     */
-    int sqroot_nprocs = sq_root(nprocs);
+    int sqroot_p = sq_root(p);
 
-    if(sqroot_nprocs*sqroot_nprocs != nprocs){
+    if(sqroot_p*sqroot_p != p){
         if(world_id = 0){
-            fprintf(stderr, "Number of procs '%d' us not a perfect square.\n", nprocs);
+            fprintf(stderr, "Number of procs '%d' us not a perfect square.\n", p);
         }
         MPI_Finalize();
         exit(2);
@@ -115,37 +117,26 @@ int main(int argc, char* argv[]){
 
     int i;
     /* Row */
-    my_row_group = safe_malloc("row group", sqroot_nprocs*sizeof(int));
+    my_row_group = safe_malloc("row group", sqroot_p*sizeof(int));
     /* Find the workers in my row*/
-    for(i =0; i < sqroot_nprocs; i++){
-        my_row_group[i] = i + (world_id/sqroot_nprocs)*sqroot_nprocs;
+    for(i =0; i < sqroot_p; i++){
+        my_row_group[i] = i + (world_id/sqroot_p)*sqroot_p;
     }
     /*Create the group and communication port*/
-    MPI_Group_incl(world_group,sqroot_nprocs,my_row_group,&row_group);
+    MPI_Group_incl(world_group,sqroot_p,my_row_group,&row_group);
     MPI_Comm_create(MPI_COMM_WORLD,row_group,&row_comm);
 
     /* Column */
-    my_column_group = safe_malloc("column group", sqroot_nprocs*sizeof(int));
+    my_column_group = safe_malloc("column group", sqroot_p*sizeof(int));
     // Find the workers in my column
-    for(i =0; i < sqroot_nprocs; i++){
-        my_column_group[i] = i*sqroot_nprocs + world_id %sqroot_nprocs;
+    for(i =0; i < sqroot_p; i++){
+        my_column_group[i] = i*sqroot_p + world_id %sqroot_p;
     }
     /*Create the group and communication port*/
-    MPI_Group_incl(world_group,sqroot_nprocs,my_column_group,&column_group);
+    MPI_Group_incl(world_group,sqroot_p,my_column_group,&column_group);
     MPI_Comm_create(MPI_COMM_WORLD,column_group,&column_comm);
 
     MPI_Barrier(MPI_COMM_WORLD);
-
-    // for(i = 0; i < nprocs; i++){
-    //     if(i == world_id){
-    //         printf("(%d) [",world_id);
-    //         int x;
-    //         for(x =0; x < sqroot_nprocs; x++){
-    //             printf(" %d ",my_column_group[x]);
-    //         }
-    //         printf("]\n");
-    //     }
-    // }
 
 
     /***************************************************
@@ -168,16 +159,20 @@ int main(int argc, char* argv[]){
         map = (double*) safe_malloc("creating map",n*n*sizeof(double));
 
         int r = 1;
-        n_squared = n*n;
+        nn = n*n;
+        nnp = nn/p;
+        n_sqp = n / sqroot_p;
         float tmp;
         int y;
         //Read in the map as a 1-D Array
-        for(y = 0; y < n_squared && r != EOF; y++){
+        for(y = 0; y < nn && r != EOF; y++){
             r = fscanf(fp,"%f",&tmp);
             if ( r != EOF) {
                 map[y] = tmp;  
+                printf(" %f ", map[y]);
             }
         }
+        printf("\n\n");
         /* Close File */
         fclose(fp);
     }
@@ -189,30 +184,29 @@ int main(int argc, char* argv[]){
                 End Read in and Distribute
     ***************************************************/
 
-    // /* Tell Everyone what n is */
-    // MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    // n_squared = n*n;
+    /* Tell Everyone what n is */
+    MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    nn = n*n;
+    nnp = nn/p;
+    n_sqp = n / sqroot_p;
 
-    // MPI_Barrier(MPI_COMM_WORLD);
+    local_section = (double*) safe_malloc("creating buffer",nnp*sizeof(double));
+    MPI_Scatter((void *) map, nnp, MPI_DOUBLE, (void *) local_section, nnp, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    // double * buffer;
-    // buffer = (double*) safe_malloc("creating buffer",n_squared/nprocs*sizeof(double));
-    // MPI_Scatter((void *) map, n*n/nprocs, MPI_DOUBLE, (void *) buffer, n*n/nprocs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    // MPI_Barrier(MPI_COMM_WORLD);
-
-    // for(i = 0; i < nprocs; i++){
+    // for(i = 0; i < p; i++){
     //     if(i == world_id){
-    //         printf("(%d) n = %d\n",world_id,n);
-    //         printf("(%d)",world_id);
+    //         printf("(%d):",world_id);
     //         int x;
-    //         for(x =0; x< n_squared/nprocs; x++){
+    //         for(x =0; x< nnp; x++){
     //             printf(" %f ",local_section[x]);
-    //             if(x % n/sqroot_nprocs == 0){
+    //             if(x % sqroot_p ==0){
     //                 printf("\n");
     //             }
     //         }
+    //         printf("\n\n");
     //     }
+    //     MPI_Barrier(MPI_COMM_WORLD);
     // }
 
     MPI_Finalize();
