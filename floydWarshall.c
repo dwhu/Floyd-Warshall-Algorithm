@@ -67,7 +67,7 @@ int main(int argc, char* argv[]){
     int nprocs;
     int n;
     int n_squared;
-    int * local_section;
+    double * local_section;
     int * my_row_group;
     int * my_column_group;
     MPI_Status status;
@@ -81,7 +81,7 @@ int main(int argc, char* argv[]){
     MPI_Comm column_comm;
 
     /* Worker 0 */
-    int * map;
+    double * map;
     
     char * FNAME;
 
@@ -150,25 +150,27 @@ int main(int argc, char* argv[]){
         /* Read off the dimensions of the array */
         fscanf(fp,"%d",&n);
 
-
         /* Have to declare malloc.  Otherwise the OS might not give us enough space */
-        map = (int*) safe_malloc("creating map",n*n*sizeof(int));
+        map = (double*) safe_malloc("creating map",n*n*sizeof(double));
 
         int r = 1;
         n_squared = n*n;
-        int tmp;
+        float tmp;
         int y;
+        //Read in the map as a 1-D Array
         for(y = 0; y < n_squared && r != EOF; y++){
-            r = fscanf(fp,"%d",&tmp);
+            r = fscanf(fp,"%f",&tmp);
             if ( r != EOF) {
-                map[y] = tmp;                    
+                map[y] = tmp;  
             }
         }
         /* Close File */
         fclose(fp);
     }
 
+    //Wait for Worker 0 to finish
     MPI_Barrier(MPI_COMM_WORLD);
+
     /***************************************************
                 End Read in and Distribute
     ***************************************************/
@@ -177,41 +179,50 @@ int main(int argc, char* argv[]){
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
     n_squared = n*n;
 
-    if( world_id == 0){
-        int * buffer;
-        buffer = (int*) safe_malloc("creating buffer",n_squared/nprocs*sizeof(int));
-        int start;
-        int stop = n_squared/sqroot_nprocs;
-        int worker_index;
-        int map_start_index;
-        for(worker_index=0; worker_index < nprocs; worker_index++){
+    MPI_Barrier(MPI_COMM_WORLD);
 
-            map_start_index = i*sqroot_nprocs;
+    // //If master worker
+    // if( world_id == 0){
+    //     //Create a buffer
+    //     double * buffer;
+    //     buffer = (double*) safe_malloc("creating buffer",n_squared/nprocs*sizeof(double));
+    //     int start;
+    //     int stop = n_squared/sqroot_nprocs;
+    //     int worker_index;
+    //     int map_start_index;
 
-            /* Load the buffer */
-            for(start = 0; start < stop; start++){
-                buffer[start] = map[start+map_start_index];
-            }
+    //     //For each worker
+    //     for(worker_index=0; worker_index < nprocs; worker_index++){
 
-            MPI_Send(buffer,n_squared/nprocs,MPI_INT,i,1,MPI_COMM_WORLD);
-        }
-    }else{
-        MPI_Recv(local_section,n_squared/nprocs, MPI_INT,0,1,MPI_COMM_WORLD,&status);
-    }
+    //         map_start_index = i*sqroot_nprocs;
 
-    for(i = 0; i < nprocs; i++){
-        if(i == world_id){
-            printf("(%d) n = %d\n",world_id,n);
-            printf("(%d)");
-            int x;
-            for(x =0; x< n_squared/nprocs; x++){
-                printf(" %d ",local_section[x]);
-                if(x % n/sqroot_nprocs == 0){
-                    printf("\n");
-                }
-            }
-        }
-    }
+    //         /* Load the buffer */
+    //         for(start = 0; start < stop; start++){
+    //             buffer[start] = map[start+map_start_index];
+    //         }
+    //         //Ship it
+    //         MPI_Send(buffer,n_squared/nprocs,MPI_DOUBLE,i,1,MPI_COMM_WORLD);
+    //     }
+    // }else{
+    //     //Recieve
+    //     MPI_Recv(local_section,n_squared/nprocs, MPI_DOUBLE,0,1,MPI_COMM_WORLD,&status);
+    // }
+
+    // MPI_Barrier(MPI_COMM_WORLD);
+
+    // for(i = 0; i < nprocs; i++){
+    //     if(i == world_id){
+    //         printf("(%d) n = %d\n",world_id,n);
+    //         printf("(%d)",world_id);
+    //         int x;
+    //         for(x =0; x< n_squared/nprocs; x++){
+    //             printf(" %f ",local_section[x]);
+    //             if(x % n/sqroot_nprocs == 0){
+    //                 printf("\n");
+    //             }
+    //         }
+    //     }
+    // }
 
     MPI_Finalize();
     
