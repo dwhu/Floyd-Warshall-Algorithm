@@ -98,6 +98,7 @@ int main(int argc, char* argv[]){
     MPI_Init(&argc,&argv);
     MPI_Comm_rank(MPI_COMM_WORLD,&world_id);
     MPI_Comm_size(MPI_COMM_WORLD,&nprocs);
+    MPI_Comm_group(MPI_COMM_WORLD,&world_group);
 
     /* Verify the correct number of workers to complete task
         ie. square_root(p) has no rounding error
@@ -113,25 +114,38 @@ int main(int argc, char* argv[]){
     }
 
     int i;
-    // /* Row */
-    // my_row_group = safe_malloc("row group", sqroot_nprocs*sizeof(int));
-    // /* Find the workers in my row*/
-    // for(i =0; i < sqroot_nprocs; i++){
-    //     my_row_group[i] = i + world_id;
-    // }
-    // /*Create the group and communication port*/
-    // MPI_Group_incl(world_group,sqroot_nprocs,my_row_group,&row_group);
-    // MPI_Comm_create(MPI_COMM_WORLD,row_group,&row_comm);
+    /* Row */
+    my_row_group = safe_malloc("row group", sqroot_nprocs*sizeof(int));
+    /* Find the workers in my row*/
+    for(i =0; i < sqroot_nprocs; i++){
+        my_row_group[i] = i + (world_id/sqroot_nprocs)*sqroot_nprocs;
+    }
+    /*Create the group and communication port*/
+    MPI_Group_incl(world_group,sqroot_nprocs,my_row_group,&row_group);
+    MPI_Comm_create(MPI_COMM_WORLD,row_group,&row_comm);
 
-    // /* Column */
-    // my_column_group = safe_malloc("column group", sqroot_nprocs*sizeof(int));
-    // /* Find the workers in my column*/
-    // for(i =0; i < sqroot_nprocs; i++){
-    //     my_column_group[i] = i*sqroot_nprocs + world_id %sqroot_nprocs;
+    /* Column */
+    my_column_group = safe_malloc("column group", sqroot_nprocs*sizeof(int));
+    // Find the workers in my column
+    for(i =0; i < sqroot_nprocs; i++){
+        my_column_group[i] = i*sqroot_nprocs + world_id %sqroot_nprocs;
+    }
+    /*Create the group and communication port*/
+    MPI_Group_incl(world_group,sqroot_nprocs,my_column_group,&column_group);
+    MPI_Comm_create(MPI_COMM_WORLD,column_group,&column_comm);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // for(i = 0; i < nprocs; i++){
+    //     if(i == world_id){
+    //         printf("(%d) [",world_id);
+    //         int x;
+    //         for(x =0; x < sqroot_nprocs; x++){
+    //             printf(" %d ",my_column_group[x]);
+    //         }
+    //         printf("]\n");
+    //     }
     // }
-    // /*Create the group and communication port*/
-    // MPI_Group_incl(world_group,sqroot_nprocs,my_column_group,&column_group);
-    // MPI_Comm_create(MPI_COMM_WORLD,column_group,&column_comm);
 
 
     /***************************************************
@@ -175,38 +189,15 @@ int main(int argc, char* argv[]){
                 End Read in and Distribute
     ***************************************************/
 
-    /* Tell Everyone what n is */
-    MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    n_squared = n*n;
+    // /* Tell Everyone what n is */
+    // MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    // n_squared = n*n;
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    // MPI_Barrier(MPI_COMM_WORLD);
 
-    // //If master worker
-    // if( world_id == 0){
-    //     //Create a buffer
-    //     double * buffer;
-    //     buffer = (double*) safe_malloc("creating buffer",n_squared/nprocs*sizeof(double));
-    //     int start;
-    //     int stop = n_squared/sqroot_nprocs;
-    //     int worker_index;
-    //     int map_start_index;
-
-    //     //For each worker
-    //     for(worker_index=0; worker_index < nprocs; worker_index++){
-
-    //         map_start_index = i*sqroot_nprocs;
-
-    //         /* Load the buffer */
-    //         for(start = 0; start < stop; start++){
-    //             buffer[start] = map[start+map_start_index];
-    //         }
-    //         //Ship it
-    //         MPI_Send(buffer,n_squared/nprocs,MPI_DOUBLE,i,1,MPI_COMM_WORLD);
-    //     }
-    // }else{
-    //     //Recieve
-    //     MPI_Recv(local_section,n_squared/nprocs, MPI_DOUBLE,0,1,MPI_COMM_WORLD,&status);
-    // }
+    // double * buffer;
+    // buffer = (double*) safe_malloc("creating buffer",n_squared/nprocs*sizeof(double));
+    // MPI_Scatter((void *) map, n*n/nprocs, MPI_DOUBLE, (void *) buffer, n*n/nprocs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     // MPI_Barrier(MPI_COMM_WORLD);
 
