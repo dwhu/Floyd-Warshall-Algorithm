@@ -64,12 +64,15 @@ int main(int argc, char* argv[]){
     
     /* Local Info */
     int world_id;
+    int i,j;
     int p;
     int n;
     int nn;
     int nnp;
     int n_sqp;
     double * local_section;
+    double * row_section;
+    double * column_section;
     int * my_row_group;
     int * my_column_group;
     MPI_Status status;
@@ -115,7 +118,6 @@ int main(int argc, char* argv[]){
         exit(2);
     }
 
-    int i;
     /* Row */
     my_row_group = safe_malloc("row group", sqroot_p*sizeof(int));
     /* Find the workers in my row*/
@@ -166,11 +168,15 @@ int main(int argc, char* argv[]){
         int y;
         //Read in the map as a 1-D Array
         for(y = 0; y < nn && r != EOF; y++){
+            if( y % n == 0){
+                printf("\n");
+            }
             r = fscanf(fp,"%f",&tmp);
             if ( r != EOF) {
                 map[y] = tmp;  
                 printf(" %f ", map[y]);
             }
+
         }
         printf("\n\n");
         /* Close File */
@@ -190,25 +196,143 @@ int main(int argc, char* argv[]){
     nnp = nn/p;
     n_sqp = n / sqroot_p;
 
-    local_section = (double*) safe_malloc("creating buffer",nnp*sizeof(double));
-    MPI_Scatter((void *) map, nnp, MPI_DOUBLE, (void *) local_section, nnp, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    //Distribute local sections
+    // local_section = (double*) safe_malloc("creating local_section buffer",nnp*sizeof(double));
+    // MPI_Scatter((void *) map, nnp, MPI_DOUBLE, (void *) local_section, nnp, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    int dest;
+    for(dest = p-1; dest >= 0; dest--){
+
+        //World id cuts up the map for the current processor
+        if(world_id == 0){
+            local_section = (double*) safe_malloc("creating local_section buffer",nnp*sizeof(double));
+
+            int starting_i = (dest % sqroot_p)*n_sqp;
+            int ending_i = starting_i+n_sqp;
+            int starting_j = (dest / sqroot_p)*n_sqp;
+            int ending_j = starting_j+n_sqp;
+
+            printf("dest(%d) %d <= i < %d %d <= j < %d\n",dest,starting_i,ending_i,starting_j,ending_j);
+
+            int index = 0;
+            for(j = starting_j; j < ending_j;j++){
+                int j_index = j*n;
+                for(i = starting_i;i < ending_i; i++){
+                    // local_section[index] = ;
+                    local_section[index] = map[i+j_index];
+                    index++;
+                }
+            }
+
+            if(dest != 0){
+                MPI_Send(local_section,nnp,MPI_DOUBLE,dest,dest,MPI_COMM_WORLD);
+            }
+
+        }else if( dest == world_id){
+
+            local_section = (double*) safe_malloc("creating local_section buffer",nnp*sizeof(double));
+            MPI_Recv(local_section,nnp,MPI_DOUBLE,0,dest,MPI_COMM_WORLD,&status);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    for(i = 0; i < p; i++){
+        if(i == world_id){
+            printf("(%d):",world_id);
+            int x;
+            for(x =0; x< nnp; x++){
+                if(x % n_sqp == 0){
+                    printf("\n");
+                }
+
+                printf(" %f ",local_section[x]);
+            }
+            printf("\n\n");
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    int row_block = world_id/sqroot_p;
+    int column_block = world_group & sqroot_p;
+    int kb,kc;
+
+    //Iteration Block from 0 to root(p)
+    for(kb=0;kb<sqroot_p;kb++){
+        //Iteration over a column/row workers partial segment block
+        //i to n/root(p)
+        for(kc=0;kc<n_sqp;kc++){
 
 
-    // for(i = 0; i < p; i++){
-    //     if(i == world_id){
-    //         printf("(%d):",world_id);
-    //         int x;
-    //         for(x =0; x< nnp; x++){
-    //             printf(" %f ",local_section[x]);
-    //             if(x % sqroot_p ==0){
-    //                 printf("\n");
-    //             }
-    //         }
-    //         printf("\n\n");
-    //     }
-    //     MPI_Barrier(MPI_COMM_WORLD);
-    // }
+            /****************************************
+            ********* Distirubte the Row and Columns
+            *****************************************/
 
+            //Allocate Memory
+            row_section = (double *) safe_malloc("creating buffer", n_sqp*sizeof(double));
+            column_section = (double *) safe_malloc("creating buffer", n_sqp*sizeof(double));
+
+            //if this worker holds the row section
+            if(row_block == kb){
+                //Copy the Data in
+                for(i=0; i < n_sqp; i++){
+                    row_section[i] = local_section[i+kc*n_sqp];
+                }
+            }
+
+            //if this worker holds this column section
+            if(column_block == kb){
+                //Copy the data in
+                for(i=0; i < n_sqp; i++){
+                    column_section[i] = local_section[kc+i*n_sqp];
+                }
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            //Broadcast both row and column to the correct group
+            MPI_Bcast(&row_section,n_sqp,MPI_DOUBLE,kb,column_comm);
+            MPI_Bcast(&column_section,n_sqp,MPI_DOUBLE,kb,row_comm);
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            if(world_id == 0){
+                printf("Row and Column Distirubted\nColumn Section: ");
+
+                for(i =0;i< n_sqp;i++){
+                    printf(" %f ", column_section[i]);
+                }
+
+                printf("\nRow Section: ");
+
+                 for(i =0;i< n_sqp;i++){
+                    printf(" %f ", row_section[i]);
+                }
+
+            }
+
+            //Update
+            for(i =0; i < n_sqp; i++){
+                for(j=0;j< n_sqp;j++){
+                    if(row_section[i]+column_section[j] < local_section[i*n_sqp+j]){
+                        local_section[i*n_sqp+j] = row_section[i]+column_section[j];
+                    }
+                }
+            }
+
+            //Free the row and Column after done
+            free((void *) column_section);
+            free((void *) row_section);
+
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+    }
+
+
+
+    free((void *) map);
+    free((void *) local_section);
     MPI_Finalize();
     
 }
