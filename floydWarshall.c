@@ -9,10 +9,35 @@ David Hughes
 #include <stdio.h>
 #include <stdlib.h>
 #include <mpi.h>
+#include <sys/time.h>
 
-typedef int bool;
-enum { false, true };
+struct timeval start_time ;
+struct timeval finish_time ;
+struct timeval current_time ;
 
+void tic()
+{
+   gettimeofday( &start_time, NULL ) ;    
+}
+
+void toc()
+{
+   gettimeofday( &finish_time, NULL ) ;    
+}
+
+
+double etime( )
+{
+   
+   long esec, eusec ;
+   double r ;
+
+   esec = finish_time.tv_sec - start_time.tv_sec ;
+   eusec = finish_time.tv_usec - start_time.tv_usec ;
+
+   r = ((double) esec) + ((double) eusec) / 1000000.0 ;
+   return r ;
+}
 
 /*
 *   Helper Function to do a square root
@@ -176,17 +201,12 @@ int main(int argc, char* argv[]){
         int y;
         //Read in the map as a 1-D Array
         for(y = 0; y < nn && r != EOF; y++){
-            if( y % n == 0){
-                printf("\n");
-            }
             r = fscanf(fp,"%f",&tmp);
             if ( r != EOF) {
                 map[y] = tmp;  
-                printf(" %0.1f ", map[y]);
             }
 
         }
-        printf("\n\n");
         /* Close File */
         fclose(fp);
     }
@@ -232,29 +252,11 @@ int main(int argc, char* argv[]){
 
             if(dest != 0){
                 MPI_Send(local_section,nnp,MPI_DOUBLE,dest,dest,MPI_COMM_WORLD);
-            }else{
-                printf("(%d)\n",world_id);
-                for(j=0;j<n_sqp;j++){
-                    for(i=0;i<n_sqp;i++){
-                        printf(" %f ", local_section[i+j*n_sqp]);
-                    }
-                    printf("\n");
-                }
-                printf("\n\n");
             }
 
         }else if( dest == world_id){
             local_section = (double*) safe_malloc("creating local_section buffer",nnp*sizeof(double));
             MPI_Recv(local_section,nnp,MPI_DOUBLE,0,dest,MPI_COMM_WORLD,&status);
-
-            printf("(%d)\n",world_id);
-            for(j=0;j<n_sqp;j++){
-                for(i=0;i<n_sqp;i++){
-                    printf(" %0.1f ", local_section[i+j*n_sqp]);
-                }
-                printf("\n");
-            }
-            printf("\n\n");
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -263,6 +265,8 @@ int main(int argc, char* argv[]){
     int row_block = world_id/sqroot_p;
     int column_block = world_id % sqroot_p;
     int kb,kc;
+
+    tic();
 
     //Iteration Block from 0 to root(p)
     for(kb=0;kb<sqroot_p;kb++){
@@ -309,19 +313,6 @@ int main(int argc, char* argv[]){
             MPI_Bcast(column_section,n_sqp,MPI_DOUBLE,kb,row_comm);
             MPI_Barrier(MPI_COMM_WORLD);
 
-            if(world_id == 2){
-                printf("Row: [");
-                for(i=0;i<n_sqp;i++){
-                    printf(" %0.1f, ", row_section[i]);
-                }
-                printf("]\n");
-                printf("Column: [");
-                for(i=0;i<n_sqp;i++){
-                    printf(" %0.1f, ", column_section[i]);
-                }
-                printf("]\n\n");
-            }
-
             //Update
             for(j=0;j< n_sqp;j++){
                 for(i =0; i < n_sqp; i++){
@@ -330,10 +321,7 @@ int main(int argc, char* argv[]){
                     current_val = local_section[index];
                     new_val = row_section[i] + column_section[j];
 
-                    if(current_val == 0){
-                        printf("%d %0.1f %0.1f %0.1f %0.1f\n",index,current_val,local_section[index], row_section[i],column_section[j]);
-                        continue;
-                    }
+                    if(current_val == 0) continue;
 
                     if(row_section[i] >=0 && column_section[j] >= 0){
                         //If the val is less than current or a path has been found
@@ -352,6 +340,7 @@ int main(int argc, char* argv[]){
             free((void *) row_section);
         }
     }
+    toc();
 
     for(dest = 0; dest < p; dest++){
 
@@ -391,19 +380,23 @@ int main(int argc, char* argv[]){
         FILE* fp;
         fp = fopen("answer.dat","w+");
         fprintf(fp, "%d\n", n);
-        printf("\n\n");
+        // printf("\n\n");
         for(j=0;j<n;j++){
             for(i=0;i<n;i++){
                 fprintf(fp," %0.1f ",map[i+j*n]);
-                printf(" %0.1f ",map[i+j*n]);
+                // printf(" %0.1f ",map[i+j*n]);
             }
             fprintf(fp,"\n");
-            printf("\n");
+            // printf("\n");
         }
          fclose(fp);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
+
+    if(world_id==0){
+        printf("%f\n",etime());
+    }
 
     MPI_Finalize();
     

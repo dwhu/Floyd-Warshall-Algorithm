@@ -1,7 +1,7 @@
 all: floydWarshall
 
 clean:
-	rm *.o a.out
+	rm *.o floydWarshall
 	
 floydWarshall: floydWarshall.o
 	mpicc floydWarshall.o -o floydWarshall
