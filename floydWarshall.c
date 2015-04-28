@@ -78,6 +78,8 @@ int main(int argc, char* argv[]){
     double * local_section;
     double * row_section;
     double * column_section;
+    double current_val;
+    double new_val;
     int * my_row_group;
     int * my_column_group;
     MPI_Status status;
@@ -180,7 +182,7 @@ int main(int argc, char* argv[]){
             r = fscanf(fp,"%f",&tmp);
             if ( r != EOF) {
                 map[y] = tmp;  
-                printf(" %f ", map[y]);
+                printf(" %0.1f ", map[y]);
             }
 
         }
@@ -206,6 +208,7 @@ int main(int argc, char* argv[]){
     /***************************************************
                 Distribute Blocks to Workers
     ***************************************************/
+
     int dest;
     for(dest = p-1; dest >= 0; dest--){
 
@@ -241,14 +244,13 @@ int main(int argc, char* argv[]){
             }
 
         }else if( dest == world_id){
-
             local_section = (double*) safe_malloc("creating local_section buffer",nnp*sizeof(double));
             MPI_Recv(local_section,nnp,MPI_DOUBLE,0,dest,MPI_COMM_WORLD,&status);
 
             printf("(%d)\n",world_id);
             for(j=0;j<n_sqp;j++){
                 for(i=0;i<n_sqp;i++){
-                    printf(" %f ", local_section[i+j*n_sqp]);
+                    printf(" %0.1f ", local_section[i+j*n_sqp]);
                 }
                 printf("\n");
             }
@@ -265,9 +267,7 @@ int main(int argc, char* argv[]){
     //Iteration Block from 0 to root(p)
     for(kb=0;kb<sqroot_p;kb++){
 
-        if(world_id == 0){
-            printf("\nKB = %d\n\n",kb);
-        }
+        MPI_Barrier(MPI_COMM_WORLD);
 
         //Iteration over a column/row workers partial segment block
         //i to n/root(p)
@@ -301,9 +301,7 @@ int main(int argc, char* argv[]){
 
                 //Copy the data in
                 for(j=0; j < n_sqp; j++){
-                    int row = j*n_sqp;
-                    column_section[j] = local_section[kc + row];
-
+                    column_section[j] = local_section[kc + j*n_sqp];
                 }
             }
 
@@ -311,56 +309,60 @@ int main(int argc, char* argv[]){
             MPI_Bcast(column_section,n_sqp,MPI_DOUBLE,kb,row_comm);
             MPI_Barrier(MPI_COMM_WORLD);
 
+            if(world_id == 2){
+                printf("Row: [");
+                for(i=0;i<n_sqp;i++){
+                    printf(" %0.1f, ", row_section[i]);
+                }
+                printf("]\n");
+                printf("Column: [");
+                for(i=0;i<n_sqp;i++){
+                    printf(" %0.1f, ", column_section[i]);
+                }
+                printf("]\n\n");
+            }
+
             //Update
-            for(i =0; i < n_sqp; i++){
-                for(j=0;j< n_sqp;j++){
-                    if(row_section[i]+column_section[j] < local_section[i*n_sqp+j] && row_section[i]+column_section[j] > 0){
-                        local_section[i*n_sqp+j] = row_section[i]+column_section[j];
+            for(j=0;j< n_sqp;j++){
+                for(i =0; i < n_sqp; i++){
+
+                    index = i+j*n_sqp;
+                    current_val = local_section[index];
+                    new_val = row_section[i] + column_section[j];
+
+                    if(current_val == 0){
+                        printf("%d %0.1f %0.1f %0.1f %0.1f\n",index,current_val,local_section[index], row_section[i],column_section[j]);
+                        continue;
+                    }
+
+                    if(row_section[i] >=0 && column_section[j] >= 0){
+                        //If the val is less than current or a path has been found
+                        if(new_val < current_val || current_val == -1){
+                            local_section[index] = new_val;
+                        }
+                    }
+
+                    if(world_id == 0){
                     }
                 }
             }
-            MPI_Barrier(MPI_COMM_WORLD);
-
-
-            if(world_id == 0){
-                printf("KC = %d\n",kc);
-             }
 
             //Free the row and Column after done
             free((void *) column_section);
             free((void *) row_section);
-
         }
     }
 
-    if(world_id == 0){
-        index = 0;
-        for(j=0;j<n_sqp;j++){
-            for(i=0;i<n_sqp;i++){
-                map[index] = local_section[i+j*n_sqp];
-                index++;
+    for(dest = 0; dest < p; dest++){
+
+        //World id cuts up the map for the current processor
+        if(world_id == 0){
+
+            if(dest != 0){
+                local_section = (double*) safe_malloc("creating local_section buffer",nnp*sizeof(double));
+                MPI_Recv(local_section,nnp,MPI_DOUBLE,dest,0,MPI_COMM_WORLD,&status);
             }
-        }
-    }
 
-    for(dest = 1; dest < p; dest++){
-
-        MPI_Barrier(MPI_COMM_WORLD);
-
-        /*****************************
-            Send Data Back to Master
-        ******************************/
-        if(world_id == dest){
-
-            MPI_Send(local_section,nnp,MPI_DOUBLE,0,0,MPI_COMM_WORLD);
-
-        }else if(world_id == 0){
-
-            /******************************************
-                Master Recieves Data and Puts it back
-             ******************************************/
-            local_section = (double*) safe_malloc("creating local_section buffer",nnp*sizeof(double));
-            MPI_Recv(local_section,nnp,MPI_DOUBLE,dest,0,MPI_COMM_WORLD,&status);
 
             starting_i = (dest % sqroot_p)*n_sqp;
             ending_i = starting_i+n_sqp;
@@ -375,18 +377,30 @@ int main(int argc, char* argv[]){
                     index++;
                 }
             }
+
+            
+
+        }else if( dest == world_id){
+            MPI_Send(local_section,nnp,MPI_DOUBLE,0,0,MPI_COMM_WORLD);
         }
+
+        MPI_Barrier(MPI_COMM_WORLD);
     }
-    MPI_Barrier(MPI_COMM_WORLD);
 
     if(world_id==0){
+        FILE* fp;
+        fp = fopen("answer.dat","w+");
+        fprintf(fp, "%d\n", n);
         printf("\n\n");
         for(j=0;j<n;j++){
             for(i=0;i<n;i++){
-                printf(" %f ",map[i+j*n_sqp]);
+                fprintf(fp," %0.1f ",map[i+j*n]);
+                printf(" %0.1f ",map[i+j*n]);
             }
+            fprintf(fp,"\n");
             printf("\n");
         }
+         fclose(fp);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
